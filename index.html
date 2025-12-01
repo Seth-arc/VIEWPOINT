@@ -1,0 +1,1297 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>VIEWPOINT // Movement Visualizer</title>
+  <style>
+    :root {
+      /* Palette */
+      --color-bg: #050505;
+      --color-surface: rgba(20, 20, 20, 0.65);
+      --color-surface-hover: rgba(30, 30, 30, 0.8);
+      --color-border: rgba(255, 255, 255, 0.1);
+      
+      --color-text: #ececec;
+      --color-text-dim: #888;
+      
+      --color-accent: #00f0ff; /* Cyberpunk Cyan */
+      --color-accent-glow: rgba(0, 240, 255, 0.4);
+      --color-secondary: #ff0055; /* Cyberpunk Pink */
+      
+      /* Typography */
+      --font-display: 'Courier New', Courier, monospace;
+      --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+      /* Spacing & Radius */
+      --space-md: 16px;
+      --space-lg: 24px;
+      --radius-sm: 8px;
+      --radius-lg: 16px;
+      
+      /* Effects */
+      --blur-strength: 20px;
+      --shadow-lg: 0 20px 50px rgba(0,0,0,0.5);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--color-bg);
+      background-image: 
+        radial-gradient(circle at 50% 0%, #1a1a1a 0%, transparent 60%),
+        linear-gradient(0deg, transparent 99%, rgba(255, 255, 255, 0.03) 100%);
+      background-size: 100% 100%, 100% 40px;
+      color: var(--color-text);
+      font-family: var(--font-ui);
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* --- Layout Structure --- */
+    .app-container {
+      display: grid;
+      grid-template-rows: 60px 1fr;
+      height: 100vh;
+      max-width: 1920px;
+      margin: 0 auto;
+    }
+
+    /* --- Header --- */
+    .site-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 var(--space-lg);
+      border-bottom: 1px solid var(--color-border);
+      background: rgba(5, 5, 5, 0.8);
+      backdrop-filter: blur(10px);
+      z-index: 100;
+    }
+
+    .brand {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.1;
+    }
+
+    .brand-title {
+      font-family: var(--font-display);
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      font-size: 1.2rem;
+    }
+
+    .brand-tag {
+      font-size: 0.65rem;
+      color: var(--color-accent);
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--font-display);
+      font-size: 0.75rem;
+      color: var(--color-text-dim);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      background: var(--color-secondary);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--color-secondary);
+      transition: all 0.3s ease;
+    }
+
+    .status-dot.active {
+      background: var(--color-accent);
+      box-shadow: 0 0 8px var(--color-accent);
+    }
+
+    /* --- Main Workspace --- */
+    .workspace {
+      display: grid;
+      grid-template-columns: 1fr 350px;
+      gap: var(--space-lg);
+      padding: var(--space-lg);
+      height: 100%;
+      overflow: hidden;
+    }
+
+    /* --- Camera Viewport --- */
+    .viewport-container {
+      position: relative;
+      background: #000;
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--color-border);
+      box-shadow: var(--shadow-lg);
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+    }
+
+    .video-wrapper {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      max-height: 100%;
+    }
+
+    #camera-feed {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    /* Overlays */
+    canvas {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+    }
+
+    #drawing-canvas { z-index: 10; filter: drop-shadow(0 0 8px var(--color-accent)); }
+    #landmarks-canvas { z-index: 5; }
+    
+    /* Tech Overlay Effects */
+    .scan-line {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 2px;
+      background: var(--color-accent);
+      opacity: 0.3;
+      box-shadow: 0 0 10px var(--color-accent);
+      animation: scan 3s linear infinite;
+      pointer-events: none;
+      z-index: 20;
+    }
+
+    .grid-overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-image: 
+        linear-gradient(rgba(0, 240, 255, 0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 240, 255, 0.05) 1px, transparent 1px);
+      background-size: 50px 50px;
+      pointer-events: none;
+      z-index: 15;
+    }
+
+    .corner-bracket {
+      position: absolute;
+      width: 40px; height: 40px;
+      border: 2px solid var(--color-accent);
+      opacity: 0.5;
+      z-index: 20;
+    }
+
+    .tl { top: 20px; left: 20px; border-right: 0; border-bottom: 0; }
+    .tr { top: 20px; right: 20px; border-left: 0; border-bottom: 0; }
+    .bl { bottom: 20px; left: 20px; border-right: 0; border-top: 0; }
+    .br { bottom: 20px; right: 20px; border-left: 0; border-top: 0; }
+
+    /* --- Sidebar --- */
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-md);
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .sidebar::-webkit-scrollbar { width: 6px; }
+    .sidebar::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }
+    .sidebar::-webkit-scrollbar-thumb:hover { background: var(--color-text-dim); }
+
+    .panel {
+      background: var(--color-surface);
+      backdrop-filter: blur(var(--blur-strength));
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      padding: var(--space-md);
+      transition: border-color 0.2s;
+    }
+
+    .panel:hover {
+      border-color: rgba(255,255,255,0.2);
+    }
+
+    h3 {
+      font-family: var(--font-display);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--color-text-dim);
+      margin: 0 0 12px 0;
+      border-bottom: 1px solid var(--color-border);
+      padding-bottom: 8px;
+    }
+
+    /* Stats Grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .stat-box {
+      background: rgba(0,0,0,0.2);
+      padding: 10px;
+      border-radius: var(--radius-sm);
+    }
+
+    .stat-label { font-size: 0.65rem; color: var(--color-text-dim); display: block; margin-bottom: 4px; }
+    .stat-value { font-family: var(--font-display); font-size: 0.9rem; color: var(--color-accent); font-weight: 700; }
+
+    /* Controls */
+    .control-group { margin-bottom: 16px; }
+    .control-header { display: flex; justify-content: space-between; font-size: 0.75rem; margin-bottom: 6px; }
+    
+    button {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--color-border);
+      color: var(--color-text);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-family: var(--font-display);
+      font-size: 0.7rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-transform: uppercase;
+    }
+
+    button:hover { background: rgba(255,255,255,0.1); }
+    button.active { 
+      background: var(--color-accent); 
+      color: #000; 
+      border-color: var(--color-accent); 
+      box-shadow: 0 0 15px var(--color-accent-glow);
+    }
+
+    input[type=range] {
+      width: 100%;
+      -webkit-appearance: none;
+      appearance: none;
+      background: transparent;
+    }
+
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      height: 14px; width: 14px;
+      border-radius: 50%;
+      background: var(--color-text);
+      cursor: pointer;
+      margin-top: -5px;
+      box-shadow: 0 0 10px rgba(255,255,255,0.5);
+    }
+
+    input[type=range]::-webkit-slider-runnable-track {
+      width: 100%; height: 4px;
+      background: var(--color-border);
+      border-radius: 2px;
+    }
+
+    /* Gesture Feed */
+    .gesture-feed {
+      height: 150px;
+      overflow-y: auto;
+      font-family: var(--font-display);
+      font-size: 0.75rem;
+    }
+
+    .feed-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      animation: slideIn 0.3s ease-out;
+    }
+
+    .feed-item span:first-child { color: var(--color-accent); }
+    .feed-item span:last-child { color: var(--color-text-dim); }
+
+    /* Gesture Subtitle (Floating) */
+    #gesture-hud {
+      position: absolute;
+      bottom: 40px;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      z-index: 50;
+      pointer-events: none;
+    }
+
+    .hud-text {
+      font-family: var(--font-display);
+      font-size: 2rem;
+      font-weight: 900;
+      color: transparent;
+      -webkit-text-stroke: 1px var(--color-accent);
+      text-transform: uppercase;
+      letter-spacing: 4px;
+      text-shadow: 0 0 20px var(--color-accent-glow);
+      opacity: 0;
+      transition: 0.3s;
+    }
+
+    .hud-text.visible { opacity: 1; transform: scale(1.1); }
+
+    /* Loading Overlay */
+    .loader-overlay {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: linear-gradient(135deg, #050505 0%, #0a0a0a 50%, #050505 100%);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 100;
+      transition: opacity 0.8s ease, transform 0.8s ease;
+      overflow: hidden;
+    }
+    
+    .loader-overlay::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: radial-gradient(circle, rgba(0, 240, 255, 0.05) 0%, transparent 70%);
+      animation: pulse 4s ease-in-out infinite;
+    }
+    
+    .loader-overlay.hidden {
+        opacity: 0;
+        transform: scale(1.1);
+        pointer-events: none;
+    }
+
+    .spinner {
+      position: relative;
+      width: 80px; 
+      height: 80px;
+      margin-bottom: 30px;
+      animation: float 3s ease-in-out infinite;
+    }
+    
+    .spinner::before,
+    .spinner::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      border: 3px solid transparent;
+      border-radius: 50%;
+      animation: spin 2s linear infinite;
+    }
+    
+    .spinner::before {
+      border-top-color: var(--color-accent);
+      border-right-color: var(--color-accent);
+    }
+    
+    .spinner::after {
+      border-bottom-color: var(--color-secondary);
+      border-left-color: var(--color-secondary);
+      animation-direction: reverse;
+      animation-duration: 1.5s;
+    }
+    
+    .spinner-inner {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 40px;
+      height: 40px;
+      border: 2px solid rgba(255, 255, 255, 0.1);
+      border-radius: 50%;
+      animation: spin 3s linear infinite reverse;
+    }
+
+    #loading-message {
+      font-family: var(--font-display);
+      color: var(--color-accent);
+      font-size: 1.2rem;
+      margin-bottom: 10px;
+      animation: glow 2s ease-in-out infinite alternate, slideDown 0.8s ease-out;
+      text-align: center;
+      max-width: 80%;
+    }
+
+    #witty-text {
+      font-size: 0.8rem;
+      color: var(--color-text-dim);
+      margin-bottom: 20px;
+      text-align: center;
+      animation: fadeIn 1s ease-in;
+      max-width: 80%;
+      line-height: 1.4;
+    }
+    
+    .loading-bar {
+      width: 300px;
+      height: 3px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 20px;
+      position: relative;
+    }
+    
+    .loading-bar::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, 
+        transparent 0%, 
+        var(--color-accent) 50%, 
+        transparent 100%);
+      animation: loadingSlide 2s ease-in-out infinite;
+    }
+
+    @keyframes glow {
+      from { text-shadow: 0 0 5px var(--color-accent); }
+      to { text-shadow: 0 0 20px var(--color-accent), 0 0 30px var(--color-accent); }
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    @keyframes slideDown {
+      from { opacity: 0; transform: translateY(-20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.8; transform: scale(1.1); }
+    }
+    
+    @keyframes loadingSlide {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(200%); }
+    }
+
+    .force-btn {
+        margin-top: 20px;
+        background: rgba(255, 0, 85, 0.2);
+        border-color: var(--color-secondary);
+        color: var(--color-secondary);
+        opacity: 0;
+        transition: opacity 1s;
+        pointer-events: none;
+    }
+    
+    .force-btn.visible {
+        opacity: 1;
+        pointer-events: auto;
+    }
+    
+    .force-btn:hover {
+        background: var(--color-secondary);
+        color: #fff;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes scan { 0% { top: 0%; opacity: 0; } 50% { opacity: 1; } 100% { top: 100%; opacity: 0; } }
+    @keyframes slideIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
+
+    /* --- Responsive --- */
+    @media (max-width: 1024px) {
+      .workspace { grid-template-columns: 1fr; grid-template-rows: 1fr auto; overflow-y: auto; }
+      .app-container { height: auto; min-height: 100vh; overflow-y: auto; }
+      .sidebar { display: grid; grid-template-columns: 1fr 1fr; }
+      .viewport-container { aspect-ratio: 4/3; }
+    }
+
+    @media (max-width: 768px) {
+      .site-header { padding: 0 var(--space-md); }
+      .workspace { padding: var(--space-md); gap: var(--space-md); }
+      .sidebar { display: flex; }
+      .viewport-container { aspect-ratio: 9/16; max-height: 60vh; }
+      .stats-grid { grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; overflow-x: auto; }
+      .stat-box { min-width: 80px; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app-container">
+    <header class="site-header">
+      <div class="brand">
+        <span class="brand-title">VIEWPOINT</span>
+        <span class="brand-tag">Visualizer v2.0</span>
+      </div>
+      <div class="status-indicator">
+        <span id="status-text">INITIALIZING...</span>
+        <div class="status-dot" id="system-dot"></div>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <div class="viewport-container">
+        <div class="loader-overlay" id="camera-loading">
+          <div class="spinner">
+            <div class="spinner-inner"></div>
+          </div>
+          <div id="loading-message">INITIALIZING SETHU'S CYBER VISION...</div>
+          <div id="witty-text">Loading Sethu's neural interface...</div>
+          <div class="loading-bar"></div>
+          <button id="force-start-btn" class="force-btn">FORCE MOUSE MODE</button>
+        </div>
+        
+        <div class="video-wrapper">
+          <div class="scan-line"></div>
+          <div class="grid-overlay"></div>
+          <div class="corner-bracket tl"></div>
+          <div class="corner-bracket tr"></div>
+          <div class="corner-bracket bl"></div>
+          <div class="corner-bracket br"></div>
+          
+          <video id="camera-feed" autoplay muted playsinline></video>
+          <canvas id="landmarks-canvas"></canvas>
+          <canvas id="drawing-canvas"></canvas>
+          <canvas id="heatmap-canvas" style="opacity: 0.5; mix-blend-mode: screen;"></canvas>
+          
+          <div id="gesture-hud">
+            <div class="hud-text" id="hud-message">IDLE</div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="sidebar">
+        <div class="panel stats-panel">
+          <h3>Telemetry</h3>
+          <div class="stats-grid">
+            <div class="stat-box">
+              <span class="stat-label">GESTURE</span>
+              <span class="stat-value" id="current-gesture">--</span>
+            </div>
+            <div class="stat-box">
+              <span class="stat-label">VELOCITY</span>
+              <span class="stat-value" id="movement-speed">0</span>
+            </div>
+            <div class="stat-box">
+              <span class="stat-label">CONFIDENCE</span>
+              <span class="stat-value" id="hand-confidence">0%</span>
+            </div>
+            <div class="stat-box">
+              <span class="stat-label">EVENTS</span>
+              <span class="stat-value" id="total-gestures">0</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel controls-panel">
+          <h3>Visual Parameters</h3>
+          <div class="control-group">
+            <div class="control-header"><span>Overlays</span></div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button id="show-landmarks">Skeleton</button>
+              <button id="show-detailed-skeleton">Detailed</button>
+              <button id="show-trails">Trails</button>
+              <button id="show-heatmap">Heatmap</button>
+              <button id="show-laser-eyes">Laser Eyes</button>
+              <button id="show-smoke">Smoke</button>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <div class="control-header"><span>Trail Decay</span></div>
+            <input type="range" id="trail-length" min="5" max="100" value="30">
+          </div>
+
+          <div class="control-group">
+            <div class="control-header"><span>Mode</span></div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button id="game-mode">🎯 Game Mode</button>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <div class="control-header"><span>Interaction Mode</span></div>
+            <div style="display: flex; gap: 8px;">
+              <button id="enable-draw">🖊️ Draw</button>
+              <button id="move-shapes">✋ Move Shapes</button>
+              <button id="clear-drawing">Clear</button>
+              <button id="create-shape">➕ Shape</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel history-panel" style="flex-grow: 1;">
+          <h3>Event Log</h3>
+          <div class="gesture-feed" id="gesture-timeline"></div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <script type="module">
+    class MovementVisualizer {
+      constructor() {
+        this.state = {
+          isDrawing: false,
+          showLandmarks: false,
+          showTrails: false,
+          showHeatmap: false,
+          showLaserEyes: false,
+          showSmoke: false,
+          moveShapes: false,
+          gameMode: false,
+          detailedSkeleton: false,
+          trailLength: 30
+        };
+        
+        this.gameTargets = [];
+        this.score = 0;
+        this.gameInterval = null;
+        
+        this.cursorHistory = [];
+        this.lastPos = { x: 0, y: 0 };
+        this.lastTime = Date.now();
+        this.gestureCount = 0;
+        this.lastGesture = '';
+        this.mode = 'initializing';
+        
+        this.gameTargets = [];
+        this.score = 0;
+        this.shapes = [];
+        this.draggedShape = null;
+        this.particles = [];
+        
+        this.init();
+      }
+
+      init() {
+        this.setupCanvas();
+        this.setupEvents();
+        this.startLoadingMessages();
+        
+        // Timeout to show the manual button if loading hangs
+        setTimeout(() => {
+            const btn = document.getElementById('force-start-btn');
+            if(btn && this.mode === 'initializing') {
+                btn.classList.add('visible');
+                btn.onclick = () => this.initMouseFallback();
+            }
+        }, 2000);
+
+        this.attemptCameraStart();
+      }
+
+      startLoadingMessages() {
+        const messages = [
+          "Loading Sethu's neural interface...",
+          "Calibrating Sethu's cyber senses...",
+          "Activating Sethu's laser vision...",
+          "Syncing Sethu's hand tracking matrix...",
+          "Initializing Sethu's gesture recognition AI...",
+          "Powering up Sethu's haptic feedback...",
+          "Connecting Sethu's mind to machine...",
+          "Sethu's digital avatar coming online...",
+          "Loading Sethu's augmented reality overlay...",
+          "Welcome Sethu, to the cyberpunk future!"
+        ];
+        
+        let messageIndex = 0;
+        const messageEl = document.getElementById('witty-text');
+        const mainMessageEl = document.getElementById('loading-message');
+        
+        const interval = setInterval(() => {
+          messageIndex = (messageIndex + 1) % messages.length;
+          messageEl.textContent = messages[messageIndex];
+          
+          // Update main message occasionally
+          if (messageIndex === 5) {
+            mainMessageEl.textContent = "CALIBRATING SETHU'S SYSTEMS...";
+          } else if (messageIndex === 8) {
+            mainMessageEl.textContent = "WELCOME SETHU!";
+          }
+        }, 800);
+        
+        // Store interval to clear later
+        this.loadingInterval = interval;
+      }
+
+      async attemptCameraStart() {
+        try {
+          // Dynamic import allows the script to continue even if file is missing
+          const module = await import('./js/gesture.js');
+          const GestureRecognizer = module.GestureRecognizer;
+          
+          if (!GestureRecognizer) throw new Error("GestureRecognizer not found in module");
+          
+          const video = document.getElementById('camera-feed');
+          const recognizer = new GestureRecognizer();
+          
+          await recognizer.startCamera(video, (results) => this.processFrame(results));
+          this.setReady('CAMERA ONLINE');
+          
+        } catch (e) {
+          console.error("Camera initialization failed:", e);
+          this.initMouseFallback();
+        }
+      }
+
+      initMouseFallback() {
+        if (this.mode === 'mouse') return;
+        this.mode = 'mouse';
+        
+        console.log("Initializing Mouse Fallback");
+        this.setReady('MOUSE INPUT MODE');
+        
+        const wrapper = document.querySelector('.video-wrapper');
+        
+        wrapper.addEventListener('mousemove', (e) => {
+          const rect = wrapper.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+          
+          this.processFrame({
+            handDetected: true,
+            cursorPosition: { x: x / rect.width, y: y / rect.height },
+            gesture: this.state.isDrawing ? 'PINCH' : 'OPEN',
+            landmarks: [{x: x / rect.width, y: y / rect.height}] 
+          });
+        });
+      }
+      
+      setReady(statusMsg) {
+        document.getElementById('camera-loading').classList.add('hidden');
+        document.getElementById('status-text').textContent = statusMsg;
+        document.getElementById('system-dot').classList.add('active');
+        
+        // Clear loading messages
+        if (this.loadingInterval) {
+          clearInterval(this.loadingInterval);
+          this.loadingInterval = null;
+        }
+      }
+
+      setupCanvas() {
+        this.canvases = {
+          landmarks: document.getElementById('landmarks-canvas'),
+          drawing: document.getElementById('drawing-canvas'),
+          heatmap: document.getElementById('heatmap-canvas')
+        };
+        
+        this.ctx = {
+          landmarks: this.canvases.landmarks.getContext('2d'),
+          drawing: this.canvases.drawing.getContext('2d'),
+          heatmap: this.canvases.heatmap.getContext('2d')
+        };
+
+        const resize = () => {
+          const wrapper = document.querySelector('.video-wrapper');
+          if(!wrapper) return;
+          const rect = wrapper.getBoundingClientRect();
+          
+          Object.values(this.canvases).forEach(c => {
+            c.width = rect.width;
+            c.height = rect.height;
+          });
+        };
+
+        window.addEventListener('resize', resize);
+        // Call immediately to size correctly
+        resize();
+        // Call again after a delay to handle layout shifts
+        setTimeout(resize, 100);
+      }
+
+      setupEvents() {
+        const toggle = (id, key) => {
+          const el = document.getElementById(id);
+          if(!el) return;
+          el.addEventListener('click', (e) => {
+            this.state[key] = !this.state[key];
+            e.target.classList.toggle('active');
+            if (id === 'show-heatmap') {
+              this.canvases.heatmap.style.display = this.state[key] ? 'block' : 'none';
+            }
+          });
+        };
+
+        toggle('show-landmarks', 'showLandmarks');
+        toggle('show-trails', 'showTrails');
+        toggle('show-heatmap', 'showHeatmap');
+        toggle('show-laser-eyes', 'showLaserEyes');
+        toggle('show-smoke', 'showSmoke');
+        toggle('show-detailed-skeleton', 'detailedSkeleton');
+        toggle('enable-draw', 'isDrawing');
+        toggle('move-shapes', 'moveShapes');
+        toggle('enable-draw', 'isDrawing');
+
+        document.getElementById('trail-length').addEventListener('input', (e) => {
+          this.state.trailLength = parseInt(e.target.value);
+        });
+
+        document.getElementById('clear-drawing').addEventListener('click', () => {
+          this.ctx.drawing.clearRect(0, 0, this.canvases.drawing.width, this.canvases.drawing.height);
+          this.shapes = []; // Clear shapes too
+        });
+
+        document.getElementById('create-shape').addEventListener('click', () => {
+          this.createShape();
+        });
+
+        document.getElementById('game-mode').addEventListener('click', () => {
+          this.state.gameMode = !this.state.gameMode;
+          document.getElementById('game-mode').classList.toggle('active');
+          if (this.state.gameMode) {
+            this.startGame();
+          } else {
+            this.stopGame();
+          }
+        });
+      }
+
+      renderTargets() {
+        if (!this.state.gameMode) return;
+        
+        const ctx = this.ctx.landmarks;
+        ctx.strokeStyle = '#ff0055';
+        ctx.lineWidth = 3;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = '#ff0055';
+        
+        this.gameTargets.forEach(target => {
+          ctx.beginPath();
+          ctx.arc(target.x, target.y, target.radius, 0, Math.PI * 2);
+          ctx.stroke();
+        });
+        
+        ctx.shadowBlur = 0;
+      }
+
+      renderShapes() {
+        const ctx = this.ctx.drawing;
+        this.shapes.forEach(shape => {
+          ctx.fillStyle = shape.color;
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 2;
+          ctx.shadowBlur = 10;
+          ctx.shadowColor = shape.color;
+          
+          ctx.fillRect(shape.x - shape.width/2, shape.y - shape.height/2, shape.width, shape.height);
+          ctx.strokeRect(shape.x - shape.width/2, shape.y - shape.height/2, shape.width, shape.height);
+          
+          ctx.shadowBlur = 0;
+        });
+      }
+
+      emitSmoke(pos) {
+        // Create smoke particles
+        for (let i = 0; i < 5; i++) {
+          this.particles.push({
+            x: pos.x + (Math.random() - 0.5) * 30,
+            y: pos.y + (Math.random() - 0.5) * 30,
+            vx: (Math.random() - 0.5) * 3,
+            vy: -Math.random() * 1.5 - 0.5,
+            life: 1.0,
+            maxLife: 1.0,
+            size: Math.random() * 15 + 8
+          });
+        }
+      }
+
+      updateParticles() {
+        this.particles = this.particles.filter(particle => {
+          particle.x += particle.vx;
+          particle.y += particle.vy;
+          particle.life -= 0.02;
+          particle.vy -= 0.01; // Gravity
+          return particle.life > 0;
+        });
+      }
+
+      renderParticles() {
+        const ctx = this.ctx.landmarks;
+        this.particles.forEach(particle => {
+          const alpha = particle.life / particle.maxLife;
+          ctx.globalAlpha = alpha * 0.6;
+          ctx.fillStyle = `rgba(150, 150, 150, ${alpha * 0.4})`;
+          ctx.beginPath();
+          ctx.arc(particle.x, particle.y, particle.size * alpha, 0, Math.PI * 2);
+          ctx.fill();
+          
+          // Add some glow
+          ctx.shadowBlur = 10;
+          ctx.shadowColor = 'rgba(150, 150, 150, 0.5)';
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        });
+        ctx.globalAlpha = 1.0;
+      }
+
+      renderLaserEyes(pos, eyePositions) {
+        const ctx = this.ctx.landmarks;
+        ctx.strokeStyle = '#ff0055';
+        ctx.lineWidth = 2;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = '#ff0055';
+        
+        const w = this.canvases.landmarks.width;
+        const h = this.canvases.landmarks.height;
+        
+        if (eyePositions) {
+          // Draw lasers from eyes
+          const leftEye = { x: eyePositions.leftEye.x * w, y: eyePositions.leftEye.y * h };
+          const rightEye = { x: eyePositions.rightEye.x * w, y: eyePositions.rightEye.y * h };
+          
+          // From left eye to right edge
+          ctx.beginPath();
+          ctx.moveTo(leftEye.x, leftEye.y);
+          ctx.lineTo(w, leftEye.y);
+          ctx.stroke();
+          
+          // From right eye to left edge
+          ctx.beginPath();
+          ctx.moveTo(rightEye.x, rightEye.y);
+          ctx.lineTo(0, rightEye.y);
+          ctx.stroke();
+          
+          // From left eye to bottom
+          ctx.beginPath();
+          ctx.moveTo(leftEye.x, leftEye.y);
+          ctx.lineTo(leftEye.x, h);
+          ctx.stroke();
+          
+          // From right eye to top
+          ctx.beginPath();
+          ctx.moveTo(rightEye.x, rightEye.y);
+          ctx.lineTo(rightEye.x, 0);
+          ctx.stroke();
+        } else {
+          // Fallback to cursor
+          ctx.beginPath();
+          // Left edge
+          ctx.moveTo(pos.x, pos.y);
+          ctx.lineTo(0, pos.y);
+          // Right edge
+          ctx.moveTo(pos.x, pos.y);
+          ctx.lineTo(w, pos.y);
+          // Top edge
+          ctx.moveTo(pos.x, pos.y);
+          ctx.lineTo(pos.x, 0);
+          // Bottom edge
+          ctx.moveTo(pos.x, pos.y);
+          ctx.lineTo(pos.x, h);
+          
+          ctx.stroke();
+        }
+        
+        ctx.shadowBlur = 0;
+      }
+
+      processFrame(data) {
+        const { cursorPosition, gesture, landmarks, handDetected, velocity: dataVelocity, eyePositions } = data;
+        
+        this.ctx.landmarks.clearRect(0, 0, this.canvases.landmarks.width, this.canvases.landmarks.height);
+
+        this.renderTargets(); // Render game targets first
+
+        this.renderShapes(); // Render draggable shapes
+        
+        this.updateParticles(); // Update smoke particles
+        this.renderParticles(); // Render smoke particles
+
+        if (handDetected || cursorPosition) {
+          // Scale normalized cursorPosition to canvas coordinates
+          const scaledPos = cursorPosition ? {
+            x: cursorPosition.x * this.canvases.landmarks.width,
+            y: cursorPosition.y * this.canvases.landmarks.height
+          } : null;
+
+          if (scaledPos) {
+            const now = Date.now();
+            const delta = (now - this.lastTime) / 1000;
+            this.lastTime = now;
+            
+            const dist = Math.hypot(scaledPos.x - this.lastPos.x, scaledPos.y - this.lastPos.y);
+            this.lastPos = scaledPos;
+            
+            // Use provided velocity or calculate from distance
+            const velocity = dataVelocity !== undefined ? dataVelocity : (delta > 0 ? dist / delta : 0);
+            document.getElementById('movement-speed').textContent = Math.round(velocity);
+
+            // Check game hits
+            this.gameTargets = this.gameTargets.filter(target => {
+              const hitDist = Math.hypot(scaledPos.x - target.x, scaledPos.y - target.y);
+              if (hitDist < target.radius) {
+                this.score += 10;
+                this.updateScoreDisplay();
+                return false;
+              }
+              return true;
+            });
+
+            // Handle shape dragging
+            if (!this.draggedShape && this.state.moveShapes) {
+              // Check if starting to drag a shape
+              this.shapes.forEach(shape => {
+                if (scaledPos.x >= shape.x - shape.width/2 && scaledPos.x <= shape.x + shape.width/2 &&
+                    scaledPos.y >= shape.y - shape.height/2 && scaledPos.y <= shape.y + shape.height/2) {
+                  this.draggedShape = shape;
+                }
+              });
+            } else if (this.draggedShape) {
+              // Update dragged shape position
+              this.draggedShape.x = scaledPos.x;
+              this.draggedShape.y = scaledPos.y;
+              
+              // Stop dragging if pinch gesture
+              if (gesture === 'PINCH') {
+                this.draggedShape = null;
+              }
+            }
+
+            this.renderTrails(scaledPos);
+            
+            if (this.state.showLandmarks) {
+               if (landmarks && landmarks.length > 1) this.renderLandmarks(landmarks);
+               else this.renderCursor(scaledPos);
+            }
+
+            if (this.state.isDrawing) this.drawStroke(scaledPos);
+            if (this.state.showHeatmap) this.updateHeatmap(scaledPos);
+            if (this.state.showLaserEyes) this.renderLaserEyes(scaledPos, eyePositions);
+          }
+          
+          // Emit smoke when hand is flat (OPEN_PALM)
+          if (this.state.showSmoke && gesture === 'OPEN_PALM' && scaledPos) {
+            this.emitSmoke(scaledPos);
+          }
+          
+          if (gesture && gesture !== this.lastGesture && gesture !== 'IDLE') {
+            this.triggerGestureEvent(gesture);
+          }
+          
+          document.getElementById('hand-confidence').textContent = handDetected ? '98%' : '100%';
+          document.getElementById('current-gesture').textContent = gesture || 'TRACKING';
+        }
+      }
+
+      renderCursor(pos) {
+        const ctx = this.ctx.landmarks;
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#00f0ff';
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = '#00f0ff';
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+
+      renderTrails(pos) {
+        if (!this.state.showTrails) return;
+
+        this.cursorHistory.push({ x: pos.x, y: pos.y });
+        if (this.cursorHistory.length > this.state.trailLength) this.cursorHistory.shift();
+
+        const ctx = this.ctx.landmarks;
+        if (this.cursorHistory.length < 2) return;
+
+        ctx.beginPath();
+        ctx.moveTo(this.cursorHistory[0].x, this.cursorHistory[0].y);
+
+        for (let i = 1; i < this.cursorHistory.length; i++) {
+          ctx.lineTo(this.cursorHistory[i].x, this.cursorHistory[i].y);
+        }
+
+        const gradient = ctx.createLinearGradient(
+          this.cursorHistory[0].x, this.cursorHistory[0].y,
+          pos.x, pos.y
+        );
+        gradient.addColorStop(0, 'rgba(0, 240, 255, 0)');
+        gradient.addColorStop(1, 'rgba(0, 240, 255, 0.8)');
+
+        ctx.strokeStyle = gradient;
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.stroke();
+      }
+
+      drawStroke(pos) {
+        const ctx = this.ctx.drawing;
+        if (this.cursorHistory.length < 2) return;
+        
+        const last = this.cursorHistory[this.cursorHistory.length - 2];
+        ctx.beginPath();
+        ctx.moveTo(last.x, last.y);
+        ctx.lineTo(pos.x, pos.y);
+        ctx.strokeStyle = '#ff0055';
+        ctx.lineWidth = 4;
+        ctx.lineCap = 'round';
+        ctx.shadowBlur = 5;
+        ctx.shadowColor = '#ff0055';
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      }
+
+      renderLandmarks(landmarks) {
+        const ctx = this.ctx.landmarks;
+        const w = this.canvases.landmarks.width;
+        const h = this.canvases.landmarks.height;
+
+        // Draw connections first (behind dots)
+        ctx.strokeStyle = '#00f0ff';
+        ctx.lineWidth = 2;
+        ctx.shadowBlur = 5;
+        ctx.shadowColor = '#00f0ff';
+        
+        const connections = [
+          // Thumb
+          [0, 1], [1, 2], [2, 3], [3, 4],
+          // Index
+          [0, 5], [5, 6], [6, 7], [7, 8],
+          // Middle
+          [0, 9], [9, 10], [10, 11], [11, 12],
+          // Ring
+          [0, 13], [13, 14], [14, 15], [15, 16],
+          // Pinky
+          [0, 17], [17, 18], [18, 19], [19, 20],
+          // Palm
+          [5, 9], [9, 13], [13, 17]
+        ];
+        
+        connections.forEach(([i, j]) => {
+          const lm1 = landmarks[i];
+          const lm2 = landmarks[j];
+          ctx.beginPath();
+          ctx.moveTo(lm1.x * w, lm1.y * h);
+          ctx.lineTo(lm2.x * w, lm2.y * h);
+          ctx.stroke();
+        });
+        
+        ctx.shadowBlur = 0;
+
+        // Draw dots on top
+        ctx.fillStyle = '#00f0ff';
+        landmarks.forEach((lm, i) => {
+            ctx.beginPath();
+            ctx.arc(lm.x * w, lm.y * h, 3, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Detailed labels
+            if (this.state.detailedSkeleton) {
+              ctx.fillStyle = '#00f0ff';
+              ctx.font = '10px monospace';
+              ctx.textAlign = 'center';
+              const labels = [
+                'WRIST', 'T_CMC', 'T_MCP', 'T_IP', 'T_TIP',
+                'I_CMC', 'I_MCP', 'I_PIP', 'I_DIP', 'I_TIP',
+                'M_CMC', 'M_MCP', 'M_PIP', 'M_DIP', 'M_TIP',
+                'R_CMC', 'R_MCP', 'R_PIP', 'R_DIP', 'R_TIP',
+                'P_CMC', 'P_MCP', 'P_PIP', 'P_DIP', 'P_TIP'
+              ];
+              ctx.fillText(labels[i] || i, lm.x * w, lm.y * h - 8);
+              ctx.fillStyle = '#00f0ff'; // Reset for dots
+            }
+        });
+      }
+
+      updateHeatmap(pos) {
+        const ctx = this.ctx.heatmap;
+        const grad = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, 40);
+        grad.addColorStop(0, 'rgba(0, 240, 255, 0.05)');
+        grad.addColorStop(1, 'transparent');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0,0, this.canvases.heatmap.width, this.canvases.heatmap.height);
+      }
+
+      startGame() {
+        this.score = 0;
+        this.gameTargets = [];
+        this.updateScoreDisplay();
+        this.spawnTarget();
+      }
+
+      stopGame() {
+        this.gameTargets = [];
+        this.score = 0;
+        this.updateScoreDisplay();
+      }
+
+      updateScoreDisplay() {
+        const scoreEl = document.getElementById('total-gestures');
+        scoreEl.textContent = this.state.gameMode ? this.score : this.gestureCount;
+        const labelEl = scoreEl.previousElementSibling;
+        labelEl.textContent = this.state.gameMode ? 'SCORE' : 'EVENTS';
+      }
+
+      createShape() {
+        const w = this.canvases.drawing.width;
+        const h = this.canvases.drawing.height;
+        const shape = {
+          x: Math.random() * (w - 100) + 50,
+          y: Math.random() * (h - 100) + 50,
+          width: 80,
+          height: 60,
+          color: `hsl(${Math.random() * 360}, 70%, 50%)`,
+          id: Date.now()
+        };
+        this.shapes.push(shape);
+      }
+
+      triggerGestureEvent(gesture) {
+        this.lastGesture = gesture;
+        this.gestureCount++;
+        document.getElementById('total-gestures').textContent = this.gestureCount;
+        
+        const feed = document.getElementById('gesture-timeline');
+        const item = document.createElement('div');
+        item.className = 'feed-item';
+        const time = new Date().toLocaleTimeString().split(' ')[0];
+        item.innerHTML = `<span>${gesture}</span><span>${time}</span>`;
+        feed.prepend(item);
+        if(feed.children.length > 20) feed.lastChild.remove();
+
+        const hud = document.getElementById('hud-message');
+        hud.textContent = gesture;
+        hud.classList.add('visible');
+        setTimeout(() => hud.classList.remove('visible'), 500);
+      }
+    }
+
+    // Robust Initialization
+    function startApp() {
+        if (window.appStarted) return;
+        window.appStarted = true;
+        new MovementVisualizer();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', startApp);
+    } else {
+        startApp();
+    }
+  </script>
+</body>
+</html>
